@@ -1,0 +1,83 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'JAVA_HOME'
+        maven 'MAVEN'
+    }
+
+    environment {
+        DOCKER_COMPOSE_FILE = 'docker-compose.yml'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo '📥 Clonage du dépôt Git...'
+                git branch: 'master', url: 'https://github.com/NakibIheb20/student-management-devops.git'
+            }
+        }
+
+        stage('Start MySQL') {
+            steps {
+                echo '🐬 Démarrage de MySQL via Docker Compose...'
+                sh '''
+                    docker compose -f $DOCKER_COMPOSE_FILE up -d db
+                    echo "⏳ Attente du démarrage complet de MySQL..."
+                    sleep 25
+                '''
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                echo '🧪 Compilation et exécution des tests...'
+                sh '''
+                    mvn clean test -Dmaven.test.failure.ignore=true \
+                        -Dspring.datasource.url=jdbc:mysql://localhost:3306/studentdb \
+                        -Dspring.datasource.username=root \
+                        -Dspring.datasource.password=root
+                '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                echo '📦 Packaging de l’application...'
+                sh 'mvn package -DskipTests'
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo '🐳 Construction de l’image Docker...'
+                sh 'docker build -t student-management:latest .'
+            }
+        }
+
+        stage('Stop Containers') {
+            steps {
+                echo '🧹 Nettoyage : arrêt des conteneurs...'
+                sh 'docker compose -f $DOCKER_COMPOSE_FILE down'
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '🎯 Pipeline terminé.'
+        }
+        success {
+            echo '✅ Build terminé avec succès !'
+        }
+        failure {
+            echo '❌ Build échoué.'
+        }
+    }
+}
